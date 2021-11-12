@@ -1,0 +1,44 @@
+mov eax, dword ptr fs:[30h]
+push eax
+xor edx, edx
+add dword ptr ss:[esp], 2
+inc edx
+pop ebx
+MOVZX EBX,BYTE PTR DS:[EBX]
+
+
+obfuscated algorythm:
+
+	mov eax, dword ptr fs:[30h]
+	movzx ebx byte ptr ds:[eax + 2]
+	mov edx,1
+	add edx, 68h
+	movzx eax, byte ptr ds:[eax]
+	mov eax, 006f7232 (watch follow in dump hex16 1st string&column)
+	mov ecx, 29h
+_1:		movzx ebx byte ptr ds:[eax]
+		xor ebx, 78h
+		mov byte ptr ds:[eax], bl
+		inc eax
+		loop _1
+
+
+
+(it do again (always do) xor ebx, 78h so we just substitute it with NOPs
+ xor ebx, edx --> xor ebx, 78h)
+
+bp on 00402F93 (here mov byte ptr ds:[eax], bl)
+and we get this in hex dump:
+006F723C  43 6F 64 65 20 4F 62 66 75 73 63 61 74 69 6F 6E  Code Obfuscation
+006F724C  20 69 73 20 61 20 70 61 69 6E 20 69 6E 20 74 68   is a pain in th
+006F725C  65 2E 2E 2E 65 79 65 21                          e...eye!
+
+
+
+
+
+
+
+
+
+

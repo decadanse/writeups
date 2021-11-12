@@ -1,0 +1,29 @@
+xxxx-xxxx-xxxx-xxxx
+R10 = code 1st + to 2nd + to 3rd + (to 4th) * 4 - 150h
+150h = 336
+ASCII digit codes from 0 to 9 are 30h-39h
+
+R = (R10x + R10y + R10z + R10t)/4 = R10  => R10x = R10y = R10z = R10t
+
+xxxx-yyyy-zzzz-tttt
+R10x = R10y = R10z = R10t
+x1 != y1 ; y1 != z1; z1 != t1
+
+30 31 32 39*4  249
+32 33 34 38*4  249
+31 34 36 37*4  249
+33 35 37 36*4  249
+0129-2348-1467-3576 - no, not that. needed not for 30-39, but for 0-9
+
+=>
+0129-4347-2496-3537 - correct
+39 39 39 39
+0+1+2+9*4=39 39 39 39
+
+___________________________________
+0084-6990-0135-8004 - correct 
+24 24 24 24
+(what I found in the net - there was no explanation how, 
+only brute with knowledge about "-" and 16 digits in key
+xxxx-xxxx-xxxx-xxxx)
+

@@ -1,0 +1,26 @@
+regedit
+was created: Компьютер\HKEY_CURRENT_USER\SOFTWARE\eLearnRE#4
+
+sum = 1st + 2-d + .. +n
+add = 1st + 2d + .. +n (in edx) --> 0x63
+xorResult = add XOR sum --> 0x26E
+--> sum = 0x20D
+
+here 00402DE6  |. 81FA 02030000  CMP EDX,302
+Solution = 0x302
+xorResult  must be = 0x302
+0x302 = 0x63 XOR ?
+? = 0x302 XOR 0x63 = 0x361 = needed sum
+
+0x361 - 0x20D = 0x154
+
+0x361 = (our hex ValidationCode in Компьютер\HKEY_CURRENT_USER\SOFTWARE\eLearnRE#4 value) + ? + ?
+
+1234567890 + ? + ? = 0x361
+
+?+?+? = 0x154
+1234567890qqr
+
+change ValidationCode in Компьютер\HKEY_CURRENT_USER\SOFTWARE\eLearnRE#4 to 1234567890qqr
+
+tack way 2 - done

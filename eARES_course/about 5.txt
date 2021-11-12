@@ -1,0 +1,5 @@
+was created file: FileName = "C:\Windows\system32\eLearnRE#5.dat"
+cause this program not create one, its compare/search it
+next we must fill file with text to rize it's size
+
+
